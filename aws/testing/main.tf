@@ -8,7 +8,7 @@ data "aws_availability_zones" "available" {}
 locals {
   region = "eu-central-1"
   name   = "testing"
-    
+
   vpc_cidr = "10.0.0.0/16"
   azs      = slice(data.aws_availability_zones.available.names, 0, 3)
 
@@ -16,7 +16,7 @@ locals {
   container_port = 8080
 
   tags = {
-    Name       = local.name
+    Name = local.name
   }
 }
 
@@ -67,10 +67,10 @@ module "ecs_service" {
   container_definitions = {
     (local.container_name) = {
       readonly_root_filesystem = false
-      cpu       = 256
-      memory    = 512
-      essential = true
-      image     = "redsource/simple-web-java:latest"
+      cpu                      = 256
+      memory                   = 512
+      essential                = true
+      image                    = "redsource/simple-web-java:latest"
       port_mappings = [
         {
           name          = local.container_name
@@ -152,8 +152,8 @@ module "alb" {
 
   listeners = {
     ex_http = {
-      port     = 443
-      protocol = "HTTPS"
+      port     = 8080
+      protocol = "HTTP"
 
       forward = {
         target_group_key = "hello-world-tg"
