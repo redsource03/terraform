@@ -28,7 +28,6 @@ module "ecs_cluster" {
   source = ".//modules/cluster"
 
   cluster_name = format("%s-%s", local.name, "cluster")
-
   # Capacity provider
   fargate_capacity_providers = {
     FARGATE = {
@@ -62,7 +61,17 @@ module "ecs_service" {
 
   # Enables ECS Exec
   enable_execute_command = true
-
+  service_connect_configuration = {
+    namespace = local.name
+    service = {
+      client_alias = {
+        port     = local.container_port
+        dns_name = local.container_name
+      }
+      port_name      = local.container_name
+      discovery_name = local.container_name
+    }
+  }
   # Container definition(s)
   container_definitions = {
     (local.container_name) = {
@@ -79,6 +88,11 @@ module "ecs_service" {
           protocol      = "tcp"
         }
       ]
+      environment = [
+          {"name":"API_HOST", "value": "http://hello-world-java-2:8080" },
+          {"name":"CONTEXT_PATH", "value": "/app1" },
+          {"name":"API_CONTEXT_PATH", "value": "/app2" }
+      ]
     }
   }
 
@@ -86,6 +100,90 @@ module "ecs_service" {
     service = {
       target_group_arn = module.alb.target_groups["hello-world-tg"].arn
       container_name   = local.container_name
+      container_port   = local.container_port
+    }
+  }
+
+  subnet_ids = module.vpc.private_subnets
+  security_group_rules = {
+    alb_ingress_3000 = {
+      type                     = "ingress"
+      from_port                = local.container_port
+      to_port                  = local.container_port
+      protocol                 = "tcp"
+      description              = "Service port"
+      source_security_group_id = module.alb.security_group_id
+    }
+    egress_all = {
+      type        = "egress"
+      from_port   = 0
+      to_port     = 0
+      protocol    = "-1"
+      cidr_blocks = ["0.0.0.0/0"]
+    }
+  }
+
+  service_tags = {
+    "ServiceTag" = "Tag on service level"
+  }
+
+  tags = local.tags
+}
+
+################################################################################
+# SERVICE2
+################################################################################
+module "ecs_service_2" {
+  source = ".//modules/ecs-service"
+
+  name        = format("%s-%s", local.name, "2")
+  cluster_arn = module.ecs_cluster.arn
+
+  cpu    = 256
+  memory = 512
+
+  # Enables ECS Exec
+  enable_execute_command = true
+  service_connect_configuration = {
+    namespace = local.name
+    service = {
+      client_alias = {
+        port     = local.container_port
+        dns_name = format("%s-%s", local.container_name, "2")
+      }
+      port_name      = format("%s-%s", local.container_name, "2")
+      discovery_name = format("%s-%s", local.container_name, "2")
+    }
+  }
+  # Container definition(s)
+  container_definitions = {
+    format("%s-%s", local.container_name, "2") = {
+      readonly_root_filesystem = false
+      cpu                      = 256
+      memory                   = 512
+      essential                = true
+      image                    = "redsource/simple-web-java:latest"
+      port_mappings = [
+        {
+          name          = format("%s-%s", local.container_name, "2")
+          containerPort = local.container_port
+          hostPort      = local.container_port
+          protocol      = "tcp"
+        }
+      ]
+      environment = [
+          {"name":"API_HOST", "value": "http://hello-world-java:8080" },
+          {"name":"CONTEXT_PATH", "value": "/app2" },
+          {"name":"API_CONTEXT_PATH", "value": "/app1" }
+      ]
+      
+    }
+  }
+
+  load_balancer = {
+    service = {
+      target_group_arn = module.alb.target_groups["hello-world-tg-2"].arn
+      container_name   = format("%s-%s", local.container_name, "2")
       container_port   = local.container_port
     }
   }
@@ -154,9 +252,39 @@ module "alb" {
     ex_http = {
       port     = 8080
       protocol = "HTTP"
-
       forward = {
         target_group_key = "hello-world-tg"
+      }
+      rules = {
+        forward-app = {
+          actions = [
+            {
+              type             = "forward"
+              target_group_key = "hello-world-tg"
+            }
+          ]
+
+          conditions = [{
+            path_pattern = {
+              values = ["/app1/*"]
+            }
+          }]
+        }
+
+        forward-app-2 = {
+          actions = [
+            {
+              type             = "forward"
+              target_group_key = "hello-world-tg-2"
+            }
+          ]
+
+          conditions = [{
+            path_pattern = {
+              values = ["/app2/*"]
+            }
+          }]
+        }
       }
     }
   }
@@ -174,7 +302,29 @@ module "alb" {
         healthy_threshold   = 5
         interval            = 30
         matcher             = "200"
-        path                = "/"
+        path                = "/app1/"
+        port                = "traffic-port"
+        protocol            = "HTTP"
+        timeout             = 5
+        unhealthy_threshold = 2
+      }
+
+      create_attachment = false
+    }
+
+    hello-world-tg-2 = {
+      backend_protocol                  = "HTTP"
+      backend_port                      = local.container_port
+      target_type                       = "ip"
+      deregistration_delay              = 5
+      load_balancing_cross_zone_enabled = true
+
+      health_check = {
+        enabled             = true
+        healthy_threshold   = 5
+        interval            = 30
+        matcher             = "200"
+        path                = "/app2/"
         port                = "traffic-port"
         protocol            = "HTTP"
         timeout             = 5
