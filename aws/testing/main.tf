@@ -62,7 +62,7 @@ module "ecs_service" {
   # Enables ECS Exec
   enable_execute_command = true
   service_connect_configuration = {
-    namespace = local.name
+    namespace = aws_service_discovery_http_namespace.example.name
     service = {
       client_alias = {
         port     = local.container_port
@@ -105,6 +105,8 @@ module "ecs_service" {
   }
 
   subnet_ids = module.vpc.private_subnets
+  
+  security_group_ids = [ aws_security_group.services-sg.id ]
   security_group_rules = {
     alb_ingress_3000 = {
       type                     = "ingress"
@@ -112,14 +114,7 @@ module "ecs_service" {
       to_port                  = local.container_port
       protocol                 = "tcp"
       description              = "Service port"
-      source_security_group_id = module.alb.security_group_id
-    }
-    egress_all = {
-      type        = "egress"
-      from_port   = 0
-      to_port     = 0
-      protocol    = "-1"
-      cidr_blocks = ["0.0.0.0/0"]
+      source_security_group_id = aws_security_group.services-sg.id
     }
   }
 
@@ -145,7 +140,7 @@ module "ecs_service_2" {
   # Enables ECS Exec
   enable_execute_command = true
   service_connect_configuration = {
-    namespace = local.name
+    namespace = aws_service_discovery_http_namespace.example.name
     service = {
       client_alias = {
         port     = local.container_port
@@ -189,6 +184,7 @@ module "ecs_service_2" {
   }
 
   subnet_ids = module.vpc.private_subnets
+  security_group_ids = [ aws_security_group.services-sg.id ]
   security_group_rules = {
     alb_ingress_3000 = {
       type                     = "ingress"
@@ -196,17 +192,9 @@ module "ecs_service_2" {
       to_port                  = local.container_port
       protocol                 = "tcp"
       description              = "Service port"
-      source_security_group_id = module.alb.security_group_id
-    }
-    egress_all = {
-      type        = "egress"
-      from_port   = 0
-      to_port     = 0
-      protocol    = "-1"
-      cidr_blocks = ["0.0.0.0/0"]
+      source_security_group_id = aws_security_group.services-sg.id
     }
   }
-
   service_tags = {
     "ServiceTag" = "Tag on service level"
   }
@@ -233,21 +221,7 @@ module "alb" {
   enable_deletion_protection = false
 
   # Security Group
-  security_group_ingress_rules = {
-    all_http = {
-      from_port   = 8080
-      to_port     = 8080
-      ip_protocol = "tcp"
-      cidr_ipv4   = "0.0.0.0/0"
-    }
-  }
-  security_group_egress_rules = {
-    all = {
-      ip_protocol = "-1"
-      cidr_ipv4   = module.vpc.vpc_cidr_block
-    }
-  }
-
+  security_groups = [aws_security_group.team1-alb-sg.id]
   listeners = {
     ex_http = {
       port     = 8080
@@ -355,3 +329,61 @@ module "vpc" {
   tags = local.tags
 }
 
+### 
+# SG
+###
+
+resource "aws_security_group" "team1-alb-sg" {
+  name        = "team1-alb-sg"
+  description = "Allow TLS inbound traffic on 8080"
+  vpc_id      = module.vpc.vpc_id
+
+  tags = local.tags
+}
+
+resource "aws_vpc_security_group_ingress_rule" "allow_http_8080_alb" {
+  security_group_id = aws_security_group.team1-alb-sg.id
+  cidr_ipv4   = "0.0.0.0/0"
+  from_port         = 8080
+  ip_protocol       = "tcp"
+  to_port           = 8080
+}
+
+
+resource "aws_vpc_security_group_egress_rule" "alb_allow_all_traffic_ipv4" {
+  security_group_id = aws_security_group.team1-alb-sg.id
+  cidr_ipv4         = module.vpc.vpc_cidr_block
+  ip_protocol       = "-1" # semantically equivalent to all ports
+}
+
+
+####
+# Services SG
+###
+resource "aws_security_group" "services-sg" {
+  name        = "team1-services-sg"
+  description = "Allow TLS inbound traffic on 8080 and all outbound traffic"
+  vpc_id      = module.vpc.vpc_id
+
+  tags = local.tags
+}
+
+
+resource "aws_security_group_rule" "services-ingress" {
+  type                     = "ingress"
+  from_port                = 8080
+  to_port                  = 8080
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.team1-alb-sg.id
+  security_group_id        = aws_security_group.services-sg.id
+}
+
+resource "aws_vpc_security_group_egress_rule" "services_allow_all_traffic_ipv4" {
+  security_group_id = aws_security_group.services-sg.id
+  cidr_ipv4         = "0.0.0.0/0"
+  ip_protocol       = "-1" # semantically equivalent to all ports
+}
+resource "aws_service_discovery_http_namespace" "example" {
+  name        = local.name
+  description = "example"
+}
